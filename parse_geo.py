@@ -124,7 +124,7 @@ def solveVRP(Nodes):
     n = len(Nodes)
     #Number of drones/agents
     max_agents = 2
-    print "\tNumber of agents available: ", max_agents
+    print "\tAgents available: ", max_agents, "\t Nodes"
 
     #max nodes for each agent
     max_nodes = 5
@@ -174,7 +174,7 @@ def solveVRP(Nodes):
 
         #Ensure that each agent visits at most "max_nodes" nodes
         for k in range(max_agents):
-            mtsp_prob += lpSum(use_edge[((i,j), k)] for i in range(n) for j in range(n) if (i+1)==j or  i==0 or j==0) <= max_nodes
+            mtsp_prob += lpSum(use_edge[((i,j), k)] for i in range(n) for j in range(n) if (i+1)==j or i==0 or j==0) <= max_nodes
 
         #Ensure that same vehicle arrives and departs from each node it serves
         sum_leaving = LpVariable("Sum Leaving Node", 0, None, LpInteger)

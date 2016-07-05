@@ -65,8 +65,6 @@ for k in range(max_agents):
     mtsp_prob += lpSum(use_edge[((i,j), k)] for i in range(n) for j in range(n) if i != j) <= max_nodes
 
 #Ensure that same vehicle arrives and departs from each node it serves
-sum_leaving = LpVariable("Sum Leaving Node", 0, None, LpInteger)
-sum_entering = LpVariable("Sum Entering Node", 0, None, LpInteger)
 for k in range(max_agents):
     for node in range(n):
         sum_entering = lpSum([use_edge[((i,node), k)] for i in range(n) if i != node ])

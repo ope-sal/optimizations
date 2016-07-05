@@ -11,7 +11,10 @@ max_agents = 2
 print "Number of agents available: ", max_agents
 
 #max nodes for each agent
-max_nodes = 10
+max_nodes = 100
+
+def route_sum(useEdge, node, vehicle):
+    return lpSum([cost(i,j)*useEdge[((i,j), vehicle)] for i in range(node) for j in range(node) if (i+1)==j or j==0 or i==0])
 
 #cost function --> return the distance between 2 Nodes
 def cost(i,j):
@@ -26,7 +29,6 @@ Points = [i for i in range(n)]
 graph = [(i,j) for i in range(n) for j in range(n) if i<j or j==0]
 list_of_agents = [i for i in range(max_agents)]
 graph = [(i,j) for i in graph for j in list_of_agents ]
-#print graph
 
 #binary variable (xij) for ILP  - will take on the value of 1 if path ij is taken by vehicle k and 0 otherwise
 use_edge = LpVariable.dicts("UseEdge", graph, lowBound = 0,  upBound = 1, cat = pulp.LpInteger)
@@ -36,7 +38,8 @@ mtsp_prob = LpProblem("MTSP-Model", LpMaximize)
 
 #objective
 #minimize cost
-mtsp_prob += lpSum([cost(edge[0][0], edge[0][1]) * use_edge[edge] for edge in graph]) #-
+mtsp_prob += lpSum([route_sum(use_edge, j, k) for i in range(n) for j in range(n) if (i+1)==j or j==0 or i==0 for k in range(max_agents)])
+#mtsp_prob += lpSum([cost(edge[0][0], edge[0][1]) * use_edge[edge] for edge in graph]) #-
 #mtsp_prob += lpSum([cost(0,j)*use_edge[((0,j),k)] for j in range(n) if j!=0 for k in range(max_agents)])
 
 #mtsp_prob += lpSum([cost(i,j)*use_edge[((i,j),k)] for i in range(n) for j in range(n) if i!=j for k in range(max_agents)])
@@ -58,23 +61,21 @@ for k in range(max_agents):
 
 #Ensure that only one tour enters each nodes
 for j in range(1,n):
-    mtsp_prob += lpSum([use_edge[((i,j), k)] for i in range(n) if i < j or j==0 for k in range(max_agents)]) == 1
+    mtsp_prob += lpSum([use_edge[((i,j), k)] for i in range(n) if (i+1)==j or j==0 or i==0 for k in range(max_agents)]) == 1
 
 #Ensure that only one tour leaves each nodes
 for i in range(1,n):
-    mtsp_prob += lpSum([use_edge[((i,j), k)] for j in range(n) if i < j or j==0 for k in range(max_agents)]) == 1
+    mtsp_prob += lpSum([use_edge[((i,j), k)] for j in range(n) if (i+1)==j or j==0 or i==0 for k in range(max_agents)]) == 1
 
 #Ensure that each agent visits at most "max_nodes" nodes
 for k in range(max_agents):
-    mtsp_prob += lpSum(use_edge[((i,j), k)] for i in range(n) for j in range(n) if i < j or j==0) <= max_nodes
+    mtsp_prob += lpSum(use_edge[((i,j), k)] for i in range(n) for j in range(n) if (i+1)==j or j==0 or i==0) <= max_nodes
 
-#Ensure that same vehicle arrives and departs from each node it serves
-sum_leaving = LpVariable("Sum Leaving Node", 0, None, LpInteger)
-sum_entering = LpVariable("Sum Entering Node", 0, None, LpInteger)
+
 for k in range(max_agents):
     for node in range(n):
-        sum_entering = lpSum([use_edge[((i,node), k)] for i in range(n) if i < node or node==0])
-        sum_leaving = lpSum([use_edge[((node,j), k)] for j in range(n) if node < j or j==0])
+        sum_entering = lpSum([use_edge[((i,node), k)] for i in range(n) if (i+1)==node or node==0 or i==0])
+        sum_leaving = lpSum([use_edge[((node,j), k)] for j in range(n) if (node+1)==j or j==0 or node==0])
         mtsp_prob +=  sum_entering - sum_leaving == 0
 
 #subtour elimination
@@ -83,7 +84,7 @@ u = LpVariable.dicts("U - Subtour Elimination", Points, 0, None, LpInteger)
 for k in range(max_agents):
     for i in range(n):
         for j in range(1, n): #constraint not defined for j = 0
-            if ((i<j) or (j==0)):
+            if ((i+1)==j or j==0 or i==0):
                 mtsp_prob += u[i] - u[j] + n*use_edge[((i,j),k)] <= n-1
 
 print "Solving ...\n"
