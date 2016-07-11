@@ -5,18 +5,23 @@ import sys
 from pulp import *
 from xml.dom import minidom
 
-
-PC_XML = 'input/PhotoCenters.kml'
-AP_XML = 'input/AccessPoints.kml'
+#Global Variables
+PC_CSV,PC_XML  = 'input/photocenters.csv','input/PhotoCenters.kml'
+AP_CSV,AP_XML = 'input/accesspoints.csv','input/AccessPoints.kml'
 OUTPUT_COORD = 'output/flight_path_'
-MAX_DISTANCE = 800 #in meters
+DIST_UNIT = 'meters' #you can use meters or miles
+MAX_DISTANCE = 800
 photocenters = []
 accesspoints = []
 partitions = []
+AVERAGE_NODE_DISTANCE = 23.3 #average distance between 2 photocenters
+AVERAGE_DRONE_SPEED = 9 # * per second
+MAX_AGENTS = 1 #Number of drones/agents
+MAX_NODES = 12 #max nodes for each agent
 
 
 
-def parse_PC_csv(use_xml=False):
+def parse_PC(use_xml=False):
     """Extract the coord information from file of photocenters.
     use_xml=False(default) if the file is csv anfd True if file is xml"""
     if use_xml==True:
@@ -27,12 +32,12 @@ def parse_PC_csv(use_xml=False):
             #longitude, Latitude
             photocenters.append([float(coord_list[0]), float(coord_list[1])])
     else:
-        with open('photocenters.csv') as csvfile:
+        with open(PC_CSV) as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 photocenters.append([float(row['X']), float(row['Y'])])
 
-def parse_AP_csv(use_xml=False):
+def parse_AP(use_xml=False):
     """Extract the coord information from csv file of access points.
     use_xml=False(default) if the file is csv anfd True if file is xml"""
     if use_xml==True:
@@ -43,7 +48,7 @@ def parse_AP_csv(use_xml=False):
             #longitude, Latitude
             accesspoints.append([float(coord_list[0]), float(coord_list[1])])
     else:
-        with open('accesspoints.csv') as csvfile:
+        with open(AP_CSV) as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 accesspoints.append([float(row['X']), float(row['Y'])])
@@ -53,21 +58,23 @@ def compute_distance(pointA, pointB, long_lat=True):
     if long_lat == True:
         pointA=tuple(pointA)
         pointB=tuple(pointB)
-        return distance(pointA,pointB)
+        return geo_distance(pointA,pointB, DIST_UNIT)
 
     else:
         return math.sqrt((pointA[0] - pointB[0])**2 + (pointA[1] - pointB[1])**2)
 
-def write_coord(list_coord, index=0):
-    """Takes a list of geo coordinates and writes it to OUTPUT_COORD +'index'+'.csv'"""
-    csvfile = open(OUTPUT_COORD + str(index) + '.csv', 'w')
-    csvfile.write("longitude,Latitude")
+def write_coord(list_coord, ap=0, agent=0):
+    """Takes a list of geo coordinates and writes it to OUTPUT_COORD +'ap'+'agent'+'.csv'"""
+    filepath = OUTPUT_COORD + '_ap' + str(ap) + '_agt' + str(agent) + '.csv'
+    csvfile = open(filepath, 'a')
+    if(os.path.getsize(filepath)==0): #if the file is empty
+        csvfile.write("longitude,Latitude\n")
     for item in list_coord:
-        csvfile.write(item[0]+','+item[1])
+        csvfile.write(repr(item[0])+','+repr(item[1]) + '\n')
     csvfile.close()
 
-def distance(coord1, coord2, units='meters'):
-    """coomputes the distace between 2 geo coordinates entered as long,lat"""
+def geo_distance(coord1, coord2, units='meters'):
+    """computes the distace between 2 geo coordinates entered as long,lat"""
     long1,lat1 = coord1
     long2,lat2 = coord2
 
@@ -85,7 +92,10 @@ def distance(coord1, coord2, units='meters'):
     # Compute spherical distance from spherical coordinates.
     cos = (math.sin(phi1)*math.sin(phi2)*math.cos(theta1 - theta2) +
     math.cos(phi1)*math.cos(phi2))
-    arc = math.acos(cos)
+    try:
+        arc = math.acos(cos)
+    except:
+        arc = 0
 
     #radius of the earth in meters
     radius = 6371 * 1000
@@ -95,103 +105,17 @@ def distance(coord1, coord2, units='meters'):
     distance = radius * arc
     return distance
 
-begin_time = time.time()
-parse_PC_csv(use_xml=True)
-parse_AP_csv(use_xml=True)
-print len(accesspoints), len(photocenters)
-#sys.exit('break for now')
-
-continue_iterations = True
-while(continue_iterations):
-    max_points = 0
-    max_ap = 0
-    #find the access point that covers the most photocenters with MAX_DISTANCE radius
-    for i in range(len(accesspoints)):
-        counter = 0
-        for pc in photocenters:
-            if(compute_distance(accesspoints[i], pc) <= MAX_DISTANCE):
-                counter += 1
-        if counter > max_points:
-            max_points = counter
-            max_ap = i
-
-    if max_points != 0: #make sure that there is atleast one point
-        #record the access point and the photocenters it covers.
-        partitions.append([accesspoints[max_ap], max_points, [pc0 for pc0 in photocenters if(compute_distance(accesspoints[max_ap], pc0) <= MAX_DISTANCE)]])
-        #remove the photocenters from their corresponding list
-        photocenters = [pc0 for pc0 in photocenters if(compute_distance(accesspoints[max_ap], pc0) > MAX_DISTANCE)]
-
-    #remove the access point from corresponding list
-    accesspoints.pop(max_ap)
-
-    if(accesspoints == []): #if all the accesspoints have been used
-        continue_iterations = False
-
-#print partitions
-print "\nAccess points used:"
-for item in partitions:
-    print '\t', item[0]
-
-#if there are photocenters that couldn't be reach from any of the access Points
-#report error
-if len(photocenters):
-    sys.exit("""Error: Solution not Feasible for this graph -
-    Some Points couldn't be reach from any access point""")
-
-max_pc =  294 #the lower the photocenters (max_pc), the longer it'll take to solve the
-#optimization problem. max_pc corresponds to the number photocenters that each agent
-#can visit. For now the number is compute by:
-# [(9m/s(speed of drone) * 14mins(time or flight)) - 800(max_distance from AP to Node)]/23m(~distance between photocenters)
-
-#slice up the partitions into smaller super nodes for the VRP
-for item in partitions:
-    item.append([[item[0]]]) #add access point for the nodes
-    j = 0
-    for i in range(len(item[2])):
-        if (i % max_pc) == 0:
-            item[3].append([item[2][i]])
-            j += 1
-        else:
-            item[3][j].append(item[2][i])
-
-# Add the startig point for each of the super node as a node for the VRP
-NodesList = []
-for partion in partitions:
-    Nodes = []
-    for item in partion[3]:
-        #for x in item:
-        #    print str(x[0])+','+str(x[1])
-        Nodes.append(tuple(item[0]))
-    NodesList.append(Nodes)
-#sys.exit('')
-#Print some summary to the screen.
-print "\nNodes: \n",
-counter = 0
-for partion in NodesList:
-    print 'AP: {0}'.format(counter),
-    counter += 1
-    for node in partion:
-        print '\t', node
-
-
 #cost function --> return the distance between 2 Nodes
 def cost(i,j, long_lat=True):
     """Returns the distance between pointA and pointB t"""
     if long_lat == True:
-        return distance((Nodes[j][0], Nodes[j][1]), (Nodes[i][0], Nodes[i][1]))
+        return geo_distance((Nodes[j][0], Nodes[j][1]), (Nodes[i][0], Nodes[i][1]), DIST_UNIT)
     else:
         return math.sqrt((Nodes[j][0] - Nodes[i][0])**2 + (Nodes[j][1] - Nodes[i][1])**2)
 
-
-def solveVRP(Nodes):
+def solveVRP(Nodes, max_agents,max_nodes):
     n = len(Nodes)
-    #Number of drones/agents
-    max_agents = 2
     print "\tAgents available: ", max_agents, "\tNodes: ", n
-
-    #max nodes for each agent
-    max_nodes = 5
-
     #Define the graph - This is a 3D graph [((node i, node j),agent k) ...]
     Points = [i for i in range(n)]
     graph = [(i,j) for i in range(n) for j in range(n) if (i+1)==j or j==0 or i==0]
@@ -267,14 +191,110 @@ def solveVRP(Nodes):
             result.append(item)
     return result
 
+def totalTime(result):
+    '''Returns the total time for flight.'''
+    max_num_node = max([len(result[node]) for node in result])
+    return max_num_node * AVERAGE_NODE_DISTANCE/AVERAGE_DRONE_SPEED
 
+begin_time = time.time()
+#initialization
+#delete the files in output folder
+filelist = [ f for f in os.listdir("output") if f.endswith(".csv") ]
+for f in filelist:
+    os.remove('output/' + f)
+
+#parse the input files and initialize arrays of photocenters and accesspoints
+parse_PC(use_xml=True)
+parse_AP(use_xml=True)
+
+continue_iterations = True
+while(continue_iterations):
+    max_points = 0
+    max_ap = 0
+    #find the access point that covers the most photocenters with MAX_DISTANCE radius
+    for i in range(len(accesspoints)):
+        counter = 0
+        for pc in photocenters:
+            if(compute_distance(accesspoints[i], pc) <= MAX_DISTANCE):
+                counter += 1
+        if counter > max_points:
+            max_points = counter
+            max_ap = i
+
+    if max_points != 0: #make sure that there is atleast one point
+        #record the access point and the photocenters it covers.
+        partitions.append([accesspoints[max_ap], max_points, [pc0 for pc0 in photocenters if(compute_distance(accesspoints[max_ap], pc0) <= MAX_DISTANCE)]])
+        #remove the photocenters from their corresponding list
+        photocenters = [pc0 for pc0 in photocenters if(compute_distance(accesspoints[max_ap], pc0) > MAX_DISTANCE)]
+
+    #remove the access point from corresponding list
+    accesspoints.pop(max_ap)
+
+    if(accesspoints == []): #if all the accesspoints have been used
+        continue_iterations = False
+
+print "\nAccess points used:"
+for item in partitions:
+    print '\t', item[0]
+
+#if there are photocenters that couldn't be reach from any of the access Points
+#report error
+if len(photocenters):
+    sys.exit("""Error: Solution not Feasible for this graph -
+    Some Points couldn't be reach from any access point""")
+
+max_pc =  294 #the lower the photocenters (max_pc), the longer it'll take to solve the
+#optimization problem. max_pc corresponds to the number photocenters that each agent
+#can visit. For now the number is compute by:
+# [(9m/s(speed of drone) * 14mins(time or flight)) - 800(max_distance from AP to Node)]/23m(~distance between photocenters)
+
+#slice up the partitions into smaller super nodes for the VRP
+for item in partitions:
+    item.append([[item[0]]]) #add access point for the nodes
+    j = 0
+    for i in range(len(item[2])):
+        if (i % max_pc) == 0:
+            item[3].append([item[2][i]])
+            j += 1
+        else:
+            item[3][j].append(item[2][i])
+
+copy_partitions = partitions
+# Add the startig point for each of the super node as a node for the VRP
+NodesList = []
+for partion in partitions:
+    Nodes = []
+    for item in partion[3]:
+        Nodes.append(tuple(item[0]))
+    NodesList.append(Nodes)
+
+#Print some summary to the screen.
+print "\nNodes: \n",
 counter = 0
-for Nodes in NodesList:
-    print "\n\nSolution to AP: ", counter
+for partion in NodesList:
+    print 'AP: {0}'.format(counter),
     counter += 1
+    for node in partion:
+        print '\t', node
 
-    solveVRP(Nodes)
+result = dict()
+ap_counter = 0
+for Nodes in NodesList:
+    print "\n\nSolution to AP: ", ap_counter
+    path = solveVRP(Nodes, MAX_AGENTS,MAX_NODES)
+    r_node = []
+    for move in path:
+        agentNum = move[1]
+        nodeIndex = move[0][0]
+        list_coords = copy_partitions[ap_counter][3][nodeIndex]
+        write_coord(list_coords,ap_counter,agentNum)
+
+        try:
+            result[agentNum] =  result[agentNum] + list_coords
+        except:
+            result[agentNum] = list_coords
+    ap_counter += 1
+print "Total flight time is", totalTime(result)
 
 print "Time taken:{0: .2f} seconds".format(time.time() - begin_time)
-#print "Number of agent", max_agents
 #print value(sum_leaving.varValue)
